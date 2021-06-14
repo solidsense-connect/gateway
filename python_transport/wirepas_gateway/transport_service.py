@@ -18,6 +18,7 @@ from wirepas_gateway.utils import LoggerHelper
 
 from wirepas_gateway.utils.solidsense_led import SolidSenseLed
 from wirepas_gateway.utils.connection_monitor import ConnectionMonitor
+from wirepas_gateway.plugin_module import PluginManager
 
 from wirepas_gateway import __version__ as transport_version
 from wirepas_gateway import __pkg_name__
@@ -177,7 +178,7 @@ class TransportService(BusClient):
     # Period in s to check for black hole issue
     MONITORING_BUFFERING_PERIOD_S = 1
 
-    def __init__(self, settings, logger=None, connection_monitor=None, **kwargs):
+    def __init__(self, settings, unknown_arguments, logger=None, connection_monitor=None, **kwargs):
         self.logger = logger or logging.getLogger(__name__)
         self.logger.info("Version is: %s", transport_version)
 
@@ -208,6 +209,10 @@ class TransportService(BusClient):
             last_will_message,
             connection_monitor,
         )
+
+        self.plugin_manager = PluginManager(self.logger, self.sink_manager, self.mqtt_wrapper, settings,
+                                            unknown_arguments)
+        self.plugin_manager.start()
 
         self.mqtt_wrapper.start()
 
@@ -303,6 +308,7 @@ class TransportService(BusClient):
         self.mqtt_wrapper.subscribe(
             topic, self._on_own_status_received
         )
+        self.plugin_manager.on_connect_hook()
 
         self._set_status()
 
@@ -321,6 +327,20 @@ class TransportService(BusClient):
         hop_count,
         data,
     ):
+        # Plugin hook
+        if self.plugin_manager.on_data_received_hook(
+            sink_id,
+            timestamp,
+            src,
+            dst,
+            src_ep,
+            dst_ep,
+            travel_time,
+            qos,
+            hop_count,
+            data
+        ):
+            return
 
         if self.whitened_ep_filter is not None and dst_ep in self.whitened_ep_filter:
             # Only publish payload size but not the payload
@@ -914,6 +934,7 @@ def main():
     parse.add_buffering_settings()
     parse.add_debug_settings()
     parse.add_deprecated_args()
+    parse.add_plugin_config()
 
     settings = parse.settings()
 
@@ -944,7 +965,7 @@ def main():
 
     # Warn if some parameters are not recognized
     if parse.unkown_arguments:
-        logger.warning("Unknown parameters %s", str(parse.unkown_arguments))
+        logger.warning("Some unknown parameters will be propagated to dynamic plugins %s", str(parse.unkown_arguments))
 
     # Create a dedicated ConnectionMonitor that deals with Leds and status file
     monitor = ConnectionMonitor(
@@ -958,7 +979,7 @@ def main():
         sys.exit(0)
     signal.signal(signal.SIGTERM, _sigterm_handler)
 
-    TransportService(settings=settings, logger=logger, connection_monitor=monitor).run()
+    TransportService(settings, parse.unkown_arguments, logger=logger, connection_monitor=monitor).run()
     monitor.on_exit()
 
 
