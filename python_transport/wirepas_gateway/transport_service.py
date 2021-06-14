@@ -4,7 +4,7 @@
 #
 import logging
 import os
-import sys
+import signal, sys
 import wirepas_mesh_messaging as wmm
 from time import time, sleep
 from uuid import getnode
@@ -14,6 +14,9 @@ from wirepas_gateway.dbus.dbus_client import BusClient
 from wirepas_gateway.protocol.topic_helper import TopicGenerator, TopicParser
 from wirepas_gateway.protocol.mqtt_wrapper import MQTTWrapper
 from wirepas_gateway.utils import ParserHelper
+
+from wirepas_gateway.utils.solidsense_led import SolidSenseLed
+from wirepas_gateway.utils.connection_monitor import ConnectionMonitor
 
 from wirepas_gateway import __version__ as transport_version
 from wirepas_gateway import __pkg_name__
@@ -170,7 +173,7 @@ class TransportService(BusClient):
     # Period in s to check for black hole issue
     MONITORING_BUFFERING_PERIOD_S = 1
 
-    def __init__(self, settings, **kwargs):
+    def __init__(self, settings, connection_monitor=None, **kwargs):
         logging.info("Version is: %s", transport_version)
 
         super(TransportService, self).__init__(
@@ -196,6 +199,7 @@ class TransportService(BusClient):
             self._on_connect,
             last_will_topic,
             last_will_message,
+            connection_monitor,
         )
 
         self.mqtt_wrapper.start()
@@ -936,7 +940,20 @@ def main():
 
     _check_parameters(settings)
 
-    TransportService(settings=settings).run()
+    # Create a dedicated ConnectionMonitor that deals with Leds and status file
+    monitor = ConnectionMonitor(
+        status_led=SolidSenseLed.ledref(settings.status_led) if settings.status_led != 0 else None,
+        status_filename=settings.status_file,
+    )
+    monitor.on_exit()  # Override existing file
+
+    def _sigterm_handler(self, *args):
+        monitor.on_exit()
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
+    TransportService(settings=settings, connection_monitor=monitor).run()
+    monitor.on_exit()
 
 
 if __name__ == "__main__":
