@@ -942,6 +942,10 @@ def main():
 
     _check_parameters(settings, logger)
 
+    # Warn if some parameters are not recognized
+    if parse.unkown_arguments:
+        logger.warning("Unknown parameters %s", str(parse.unkown_arguments))
+
     # Create a dedicated ConnectionMonitor that deals with Leds and status file
     monitor = ConnectionMonitor(
         status_led=SolidSenseLed.ledref(settings.status_led) if settings.status_led != 0 else None,

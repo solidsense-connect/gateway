@@ -101,7 +101,7 @@ class ParserHelper:
         """ Reads an yaml settings file and puts it through argparse """
 
         # Parse args from cmd line to see if a custom setting file is specified
-        self._arguments = self.parser.parse_args()
+        self._arguments, self._unknown_arguments = self.parser.parse_known_args()
 
         if self._arguments.settings is not None:
             with open(self._arguments.settings, "r") as f:
@@ -139,7 +139,7 @@ class ParserHelper:
                     arglist.append(arg)
 
             # Override self._arguments as there are parameters from file
-            self._arguments = self.parser.parse_args(arglist)
+            self._arguments, self._unknown_arguments = self.parser.parse_known_args(arglist)
 
         if settings_class is None:
             settings_class = Settings
