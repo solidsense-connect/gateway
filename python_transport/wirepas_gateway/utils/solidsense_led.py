@@ -59,6 +59,9 @@ class SolidSenseLed:
             if entry.name.startswith('mmc'):
                 continue
             lent=len(entry.name)
+            # correction issue #695
+            if not entry.name[lent-1:lent].isdecimal():
+                continue   # invalid entry
             led_num=int(entry.name[lent-1:lent])
             color=entry.name[:lent-1]
             led=SolidSenseLed.leds[led_num]
