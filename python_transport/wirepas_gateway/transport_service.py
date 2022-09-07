@@ -186,6 +186,7 @@ class TransportService(BusClient):
         self.gw_id = settings.gateway_id
         self.gw_model = settings.gateway_model
         self.gw_version = settings.gateway_version
+        self.qos = settings.mqtt_qos
 
         self.whitened_ep_filter = settings.whitened_endpoints_filter
 
@@ -250,7 +251,7 @@ class TransportService(BusClient):
 
         topic = TopicGenerator.make_status_topic(self.gw_id)
 
-        self.mqtt_wrapper.publish(topic, event_online.payload, qos=1, retain=True)
+        self.mqtt_wrapper.publish(topic, event_online.payload, qos=self.qos, retain=True)
 
     def _on_connect(self):
         # Register for get gateway info
@@ -384,7 +385,7 @@ class TransportService(BusClient):
         # Set qos to 1 to avoid loading too much the broker
         # unique id in event header can be used for duplicate filtering in
         # backends
-        self.mqtt_wrapper.publish(topic, event.payload, qos=1)
+        self.mqtt_wrapper.publish(topic, event.payload, qos=self.qos)
 
     def on_stack_started(self, name):
         logging.debug("Sink started: %s", name)
@@ -572,7 +573,7 @@ class TransportService(BusClient):
         )
 
         topic = TopicGenerator.make_get_gateway_info_response_topic(self.gw_id)
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=self.qos)
 
     @deferred_thread
     def _on_set_config_cmd_received(self, client, userdata, message):
@@ -600,7 +601,7 @@ class TransportService(BusClient):
             self.gw_id, request.sink_id
         )
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=self.qos)
 
     @deferred_thread
     def _on_otap_status_request_received(self, client, userdata, message):
