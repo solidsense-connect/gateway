@@ -9,6 +9,7 @@ from select import select
 from threading import Thread, Lock
 from time import sleep
 from datetime import datetime
+import socks
 
 from paho.mqtt import client as mqtt
 from paho.mqtt.client import connack_string
@@ -25,6 +26,9 @@ class MQTTWrapper(Thread):
 
     # Keep alive time with broker
     KEEP_ALIVE_S = 20
+
+    proxy_types = {"HTTP": socks.HTTP, "SOCKS4": socks.SOCKS4, "SOCKS5": socks.SOCKS5}
+    proxy_options = ["proxy_port", "proxy_rdns", "proxy_username", "proxy_password"]
 
     def __init__(
         self,
@@ -78,6 +82,11 @@ class MQTTWrapper(Thread):
         self.logger.info(
             "Max inflight messages set to %s", settings.mqtt_max_inflight_messages
         )
+
+        # proxy settings
+        if settings.proxy_address is not None:
+            self._set_proxy(settings)
+
         self._client.max_inflight_messages_set(settings.mqtt_max_inflight_messages)
 
         self._client.username_pw_set(settings.mqtt_username, settings.mqtt_password)
@@ -117,6 +126,29 @@ class MQTTWrapper(Thread):
         self.connected = False
         self.first_connection_done = False
         self._connection_monitor.on_connecting()
+
+    def _set_proxy(self, settings):
+        if settings.proxy_type is None:
+            self.logger.error("No proxy type defined")
+            return
+        try:
+            proxy_type = self.proxy_types[settings.proxy_type]
+        except KeyError:
+            self.logger.error("Wrong proxy type: %s" % settings.proxy_type)
+            return
+        proxy = {"proxy_type": proxy_type, "proxy_addr": settings.proxy_address }
+        for opt in self.proxy_options:
+            try:
+                opt_val = getattr(settings, opt)
+            except AttributeError:
+                continue
+            if opt_val is not None:
+                proxy[opt] = opt_val
+        self.logger.info("Setting proxy for MQTT connection: %s" % proxy)
+        self._client.proxy_set(proxy)
+
+
+
 
     def _on_connect(self, client, userdata, flags, rc):
         # pylint: disable=unused-argument

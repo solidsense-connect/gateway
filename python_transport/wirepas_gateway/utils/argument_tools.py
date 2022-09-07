@@ -360,8 +360,62 @@ class ParserHelper:
             const=True,
             help=(
                 "When true the mqtt client will use websocket instead of TCP for transport"
-            ),
+            )
         )
+
+        self.mqtt.add_argument(
+            "--mqtt_qos",
+            default=1,
+            action="store",
+            type=int,
+            choices=[1, 2],
+            help="QoS for MQTT data publish =1 by default. Can be set to 2 when needed by broker (AWS)"
+        )
+
+        self.mqtt.add_argument(
+            "--proxy_type",
+            type=str,
+            required=False,
+            choices=["HTTP", "SOCKS4", "SOCKS5"],
+            action="store"
+        )
+
+        self.mqtt.add_argument(
+            "--proxy_address",
+            type=str,
+            required=False,
+            action="store"
+        )
+
+        self.mqtt.add_argument(
+            "--proxy_port",
+            type=int,
+            required=False,
+            action="store"
+        )
+
+        self.mqtt.add_argument(
+            "--proxy_rdns",
+            type=bool,
+            required=False,
+            action="store",
+            default=True
+        )
+
+        self.mqtt.add_argument(
+            "--proxy_username",
+            type=str,
+            action="store",
+            required=False
+        )
+
+        self.mqtt.add_argument(
+            "--proxy_password",
+            type=str,
+            action="store",
+            required=False
+        )
+
 
     def add_buffering_settings(self):
         """ Parameters used to avoid black hole case """
