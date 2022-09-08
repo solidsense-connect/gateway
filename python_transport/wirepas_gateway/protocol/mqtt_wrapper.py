@@ -85,6 +85,7 @@ class MQTTWrapper(Thread):
 
         # proxy settings
         if settings.proxy_address is not None:
+            self.logger.info("Proxy address detected %s -> setting up a proxy" % settings.proxy_address)
             self._set_proxy(settings)
 
         self._client.max_inflight_messages_set(settings.mqtt_max_inflight_messages)
@@ -145,10 +146,10 @@ class MQTTWrapper(Thread):
             if opt_val is not None:
                 proxy[opt] = opt_val
         self.logger.info("Setting proxy for MQTT connection: %s" % proxy)
-        self._client.proxy_set(proxy)
-
-
-
+        try:
+            self._client.proxy_set(proxy)
+        except AttributeError:
+            self.logger.error("Wrong version for paho-mqtt (1.6.x needed) - proxy NOT set")
 
     def _on_connect(self, client, userdata, flags, rc):
         # pylint: disable=unused-argument

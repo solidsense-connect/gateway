@@ -377,21 +377,24 @@ class ParserHelper:
             type=str,
             required=False,
             choices=["HTTP", "SOCKS4", "SOCKS5"],
-            action="store"
+            action="store",
+            help="proxy type, one of HTTP, SOCKS4, SOCKS5"
         )
 
         self.mqtt.add_argument(
             "--proxy_address",
             type=str,
             required=False,
-            action="store"
+            action="store",
+            help="Proxy URL or address"
         )
 
         self.mqtt.add_argument(
             "--proxy_port",
             type=int,
             required=False,
-            action="store"
+            action="store",
+            help="Proxy port of the ont default one (1080 or 8080)"
         )
 
         self.mqtt.add_argument(
@@ -399,21 +402,24 @@ class ParserHelper:
             type=bool,
             required=False,
             action="store",
-            default=True
+            default=True,
+            help="Boolean flag for DNS proxy address processing, True by default"
         )
 
         self.mqtt.add_argument(
             "--proxy_username",
             type=str,
             action="store",
-            required=False
+            required=False,
+            help="Username or userid for socks connections"
         )
 
         self.mqtt.add_argument(
             "--proxy_password",
             type=str,
             action="store",
-            required=False
+            required=False,
+            help="Password for SOCKS4 connections"
         )
 
 
