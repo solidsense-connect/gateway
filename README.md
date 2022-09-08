@@ -201,7 +201,28 @@ file is given below:
     whitened_endpoints_filter: <Endpoints to whiten. Ex: [1, 2, 10-12]>
 ```
 
-#### Optional
+#### Optional parameters
+
+##### Setting up the QoS
+
+By default, the QoS for MQTT publish is set to 1 but some brokers do not accept that QoS. AWS in particular.
+To allow the configuration of the QoS a specific parameter has been added.
+-   **mqtt_qos:** QoS for data publish 1 (default) or 2
+
+###### Connection through a proxy
+
+The connection towards the broker is now possible through a proxy by settings the following parameters:
+
+-   **proxy_type:** Type of proxy, shall be one of HTTP/SOCK4/SOCKS5 (no default - mandatory)
+-   **proxy_address:** Address of the proxy either a URL or an IP (no default - mandatory)
+-   **proxy_port:** Port of the proxy (optional - default 1080 for sock and 8080 for http)
+-   **proxy_rdns:** Boolean flag than modifies the behavior regarding DNS resolving. See PySocks documentation for details (optional)
+-   **proxy_username:** see PySocks documentation (optional)
+-   **proxy_password:** see PySocks documentation (optional)
+
+The proxy connectivity is implemented through the package [PySocks](https://github.com/Anorov/PySocks). The package is present by default on SolidSense software package
+
+**The proxy feature is only available with Paho 1.6.1 version**
 
 ##### Start services with systemd
 
@@ -229,6 +250,8 @@ wm-node-conf --help
 ## Option 2: Docker installation
 
 In order to ease the installation in a Docker environment, please see the instruction in [docker folder](docker).
+The Docker files under [container folder](container) are still used for our internal CI but must no be used for other purposes.
+They will be removed at some point.
 
 ## Contributing
 
