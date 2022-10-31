@@ -234,7 +234,7 @@ class MQTTWrapper(Thread):
 
     def _set_last_will(self, topic, data):
         # Set Last wil message
-        self._client.will_set(topic, data, qos=2, retain=True)
+        self._client.will_set(topic, data, qos=1, retain=True)
 
     def run(self):
         self.running = True
@@ -296,7 +296,16 @@ class MQTTWrapper(Thread):
         self._publish_queue.put((topic, payload, qos, retain))
         self._publish_monitor.on_publish_request()
 
-    def subscribe(self, topic, cb, qos=2) -> None:
+    def subscribe(self, topic, cb, qos=1) -> None:
+        """ Method to subscribe to mqtt topic
+
+        Args:
+            topic: Topic to subscribe to
+            cb: Callback to call on message reception
+            qos: Qos to use. Can be less than requested if broker does
+                 not support it
+
+        """
         self.logger.debug("Subscribing to: {}".format(topic))
         self._client.subscribe(topic, qos)
         self._client.message_callback_add(topic, cb)

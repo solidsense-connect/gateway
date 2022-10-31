@@ -7,7 +7,7 @@ import os
 import wirepas_mesh_messaging as wmm
 from time import time, sleep
 from uuid import getnode
-from threading import Thread
+from threading import Thread, Lock
 
 from wirepas_gateway.dbus.dbus_client import BusClient
 from wirepas_gateway.protocol.topic_helper import TopicGenerator, TopicParser
@@ -159,6 +159,83 @@ class ConnectionToBackendMonitorThread(Thread):
                 sink.cost = self.minimum_sink_cost
 
 
+class MessageManager:
+    def __init__(
+        self,
+        time_window,
+        cache_update_s
+    ):
+        """
+        Manage and cache messages to avoid sending duplicate in MQTT with QoS=1.
+
+        Args:
+            time_window: time in seconds after which a message is clean from the cache.
+            cache_update_s: period in seconds to update the list of received messages.
+                            Must be shorter than time_window
+        """
+        self._lock = Lock()
+        self.msg_list = dict()  # Dictionary of received messages id mapped to their timestamps
+
+        self.time_window = time_window
+        self.cache_update_s = min(cache_update_s, time_window)
+
+        self.latest_timestamp = 0  # latest timestamp of a received message
+        self.last_update_time = 0  # last time an update of the list of received messages was done
+
+    def add_msg(self, msg_id):
+        """
+        Adds a received message to the cache.
+        If the message is a duplicate, it only updates its last timestamp to the current time.
+
+        Args:
+            msg_id: the id of a message to be added to the cache.
+        """
+        time_s_epoch = time()
+        with self._lock:
+            self._update_latest_timestamp(time_s_epoch)
+
+            if self.latest_timestamp - self.last_update_time >  self.cache_update_s:
+                self._update_msg_list()
+
+            is_duplicate = self._is_duplicate(msg_id)
+            self.msg_list[msg_id] = time_s_epoch
+            return not is_duplicate
+
+    def get_size(self):
+        """
+        Returns the number of messages in the cache.
+        """
+        with self._lock:
+            return len(self.msg_list)
+
+    def _update_msg_list(self):
+        """
+        Clean the old messages in the cache
+        based on cleaning time period time_window attribute.
+        """
+        self.msg_list = {
+            msg_id: msg_time for (msg_id, msg_time) in self.msg_list.items()
+            if self.latest_timestamp - msg_time <= self.time_window
+        }
+        self.last_update_time = self.latest_timestamp
+
+    def _update_latest_timestamp(self, timestamp):
+        """
+        Updates the latest timestamp of a received message.
+        """
+        self.latest_timestamp = max(self.latest_timestamp, timestamp)
+
+    def _is_duplicate(self, msg_id):
+        """
+        Returns True if the id of a message is already in the cache.
+        Return False otherwise.
+
+        Args:
+            msg_id: id of the message received
+        """
+        return msg_id in self.msg_list
+
+
 class TransportService(BusClient):
     """
     Implementation of gateway to backend protocol
@@ -234,6 +311,8 @@ class TransportService(BusClient):
         else:
             self.data_event_id = None
 
+        self.msg_manager = MessageManager(settings.cache_time_window, settings.cache_update_s)
+
     def _on_mqtt_wrapper_termination_cb(self):
         """
         Callback used to be informed when the MQTT wrapper has exited
@@ -266,10 +345,7 @@ class TransportService(BusClient):
         # Register for send data request for any sink on the gateway
         topic = TopicGenerator.make_send_data_request_topic(self.gw_id)
         self.logger.debug("Subscribing to: %s", topic)
-        # It is important to have a qos of 2 and also from the publisher as 1 could generate
-        # duplicated packets and we don't know the consequences on end
-        # application
-        self.mqtt_wrapper.subscribe(topic, self._on_send_data_cmd_received, qos=2)
+        self.mqtt_wrapper.subscribe(topic, self._on_send_data_cmd_received, qos=1)
 
         # Register for otap commands for any sink on the gateway
         topic = TopicGenerator.make_otap_status_request_topic(self.gw_id)
@@ -391,7 +467,7 @@ class TransportService(BusClient):
             sink.read_config(),
         )
         topic = TopicGenerator.make_set_config_response_topic(self.gw_id, sink.sink_id)
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     def _send_asynchronous_get_configs_response(self):
         # Create a list of different sink configs
@@ -408,7 +484,7 @@ class TransportService(BusClient):
         )
         topic = TopicGenerator.make_get_configs_response_topic(self.gw_id)
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     def deferred_thread(fn):
         """
@@ -458,6 +534,9 @@ class TransportService(BusClient):
             self.logger.error(str(e))
             return
 
+        if not self.msg_manager.add_msg(request.req_id):
+            return
+
         # Get the sink-id from topic
         _, sink_id = TopicParser.parse_send_data_topic(message.topic)
 
@@ -487,7 +566,7 @@ class TransportService(BusClient):
         response = wmm.SendDataResponse(request.req_id, self.gw_id, res, sink_id)
         topic = TopicGenerator.make_send_data_response_topic(self.gw_id, sink_id)
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_get_configs_cmd_received(self, client, userdata, message):
@@ -497,6 +576,9 @@ class TransportService(BusClient):
             request = wmm.GetConfigsRequest.from_payload(message.payload)
         except wmm.GatewayAPIParsingException as e:
             self.logger.error(str(e))
+            return
+
+        if not self.msg_manager.add_msg(request.req_id):
             return
 
         # Create a list of different sink configs
@@ -511,7 +593,7 @@ class TransportService(BusClient):
         )
         topic = TopicGenerator.make_get_configs_response_topic(self.gw_id)
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_own_status_received(self, client, userdata, message):
@@ -543,6 +625,9 @@ class TransportService(BusClient):
             self.logger.error(str(e))
             return
 
+        if not self.msg_manager.add_msg(request.req_id):
+            return
+
         response = wmm.GetGatewayInfoResponse(
             request.req_id,
             self.gw_id,
@@ -554,7 +639,7 @@ class TransportService(BusClient):
         )
 
         topic = TopicGenerator.make_get_gateway_info_response_topic(self.gw_id)
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_set_config_cmd_received(self, client, userdata, message):
@@ -564,6 +649,9 @@ class TransportService(BusClient):
             request = wmm.SetConfigRequest.from_payload(message.payload)
         except wmm.GatewayAPIParsingException as e:
             self.logger.error(str(e))
+            return
+
+        if not self.msg_manager.add_msg(request.req_id):
             return
 
         self.logger.debug("Set sink config: %s", request)
@@ -582,7 +670,7 @@ class TransportService(BusClient):
             self.gw_id, request.sink_id
         )
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_otap_status_request_received(self, client, userdata, message):
@@ -592,6 +680,9 @@ class TransportService(BusClient):
             request = wmm.GetScratchpadStatusRequest.from_payload(message.payload)
         except wmm.GatewayAPIParsingException as e:
             self.logger.error(str(e))
+            return
+
+        if not self.msg_manager.add_msg(request.req_id):
             return
 
         sink = self.sink_manager.get_sink(request.sink_id)
@@ -632,7 +723,7 @@ class TransportService(BusClient):
             self.gw_id, request.sink_id
         )
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_otap_upload_scratchpad_request_received(self, client, userdata, message):
@@ -645,6 +736,9 @@ class TransportService(BusClient):
             return
 
         self.logger.info("OTAP upload request received for %s", request.sink_id)
+
+        if not self.msg_manager.add_msg(request.req_id):
+            return
 
         sink = self.sink_manager.get_sink(request.sink_id)
         if sink is not None:
@@ -660,7 +754,7 @@ class TransportService(BusClient):
             self.gw_id, request.sink_id
         )
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_otap_process_scratchpad_request_received(self, client, userdata, message):
@@ -670,6 +764,9 @@ class TransportService(BusClient):
             request = wmm.ProcessScratchpadRequest.from_payload(message.payload)
         except wmm.GatewayAPIParsingException as e:
             self.logger.error(str(e))
+            return
+
+        if not self.msg_manager.add_msg(request.req_id):
             return
 
         sink = self.sink_manager.get_sink(request.sink_id)
@@ -686,7 +783,7 @@ class TransportService(BusClient):
             self.gw_id, request.sink_id
         )
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
     @deferred_thread
     def _on_otap_set_target_scratchpad_request_received(
@@ -706,6 +803,9 @@ class TransportService(BusClient):
         except KeyError:
             self.logger.error("Action is mandatory")
             res = wmm.GatewayResultCode.GW_RES_INVALID_PARAM
+
+        if not self.msg_manager.add_msg(request.req_id):
+            return
 
         if res == wmm.GatewayResultCode.GW_RES_OK:
             # Get optional params (None if not present)
@@ -751,7 +851,7 @@ class TransportService(BusClient):
             self.gw_id, request.sink_id
         )
 
-        self.mqtt_wrapper.publish(topic, response.payload, qos=2)
+        self.mqtt_wrapper.publish(topic, response.payload, qos=1)
 
 
 def parse_setting_list(list_setting):
@@ -907,6 +1007,7 @@ def main():
     parse.add_gateway_config()
     parse.add_filtering_config()
     parse.add_buffering_settings()
+    parse.add_cache_settings()
     parse.add_debug_settings()
     parse.add_deprecated_args()
 
